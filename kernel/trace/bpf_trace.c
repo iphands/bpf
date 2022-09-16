@@ -1029,8 +1029,17 @@ static const struct bpf_func_proto bpf_get_func_ip_proto_tracing = {
 BPF_CALL_1(bpf_get_func_ip_kprobe, struct pt_regs *, regs)
 {
 	struct kprobe *kp = kprobe_running();
+	uintptr_t addr;
 
-	return kp ? (uintptr_t)kp->addr : 0;
+	if (!kp || !(kp->flags & KPROBE_FLAG_ON_FUNC_ENTRY))
+		return 0;
+
+	addr = (uintptr_t)kp->addr;
+#ifdef CONFIG_X86_KERNEL_IBT
+	if (is_endbr(*((u32 *) addr - 1)))
+		addr -= ENDBR_INSN_SIZE;
+#endif
+	return addr;
 }
 
 static const struct bpf_func_proto bpf_get_func_ip_proto_kprobe = {
@@ -2419,6 +2428,10 @@ kprobe_multi_link_handler(struct fprobe *fp, unsigned long entry_ip,
 {
 	struct bpf_kprobe_multi_link *link;
 
+#ifdef CONFIG_X86_KERNEL_IBT
+	if (is_endbr(*((u32 *) entry_ip - 1)))
+		entry_ip -= ENDBR_INSN_SIZE;
+#endif
 	link = container_of(fp, struct bpf_kprobe_multi_link, fp);
 	kprobe_multi_link_prog_run(link, entry_ip, regs);
 }
